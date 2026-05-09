@@ -1,0 +1,5 @@
+/target
+mpv.exe
+d3dcompiler_43.dll
+Cargo.lock
+mpv_internal_log.txt
