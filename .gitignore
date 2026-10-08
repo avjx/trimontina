@@ -1,5 +1,8 @@
+# Build artifacts
 /target
-mpv.exe
-d3dcompiler_43.dll
-Cargo.lock
-mpv_internal_log.txt
+
+# Symlink created by `nix-build` / `nix-shell`
+/result
+
+# Native libraries shipped next to the executable on Windows
+/*.dll

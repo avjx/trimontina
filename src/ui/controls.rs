@@ -1,57 +1,78 @@
-use crate::state::app_state::AppState;
-use crate::video::ffmpeg::cut_video;
-use dioxus::prelude::*;
-use rfd::AsyncFileDialog;
+use eframe::egui;
 
-#[component]
-pub fn Controls() -> Element {
-    let mut state = AppState::use_state();
-    let is_playing = (state.is_playing)();
+use crate::app::{AppState, ExportStatus};
+use crate::ui::{theme, timeline};
 
-    rsx! {
-        div { class: "controls",
-            button {
-                onclick: move |_| {
-                    let next_state = !is_playing;
-                    state.is_playing.set(next_state);
-                    state.mpv.peek().set_pause(!next_state);
-                },
-                if is_playing { "PAUSE" } else { "PLAY" }
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ControlAction {
+    OpenMedia,
+    TogglePlay,
+    Export,
+}
+
+pub fn show(ui: &mut egui::Ui, state: &AppState) -> Option<ControlAction> {
+    let mut action = None;
+
+    ui.horizontal(|ui| {
+        if ui.button("Open video").clicked() {
+            action = Some(ControlAction::OpenMedia);
+        }
+
+        let play_label = if state.playing { "⏸  Pause" } else { "▶  Play" };
+        if ui
+            .add_enabled(state.has_media(), egui::Button::new(play_label))
+            .clicked()
+        {
+            action = Some(ControlAction::TogglePlay);
+        }
+
+        if state.has_media() {
+            ui.label(
+                egui::RichText::new(format!(
+                    "{} / {}",
+                    timeline::format_time(state.position),
+                    timeline::format_time(state.duration)
+                ))
+                .monospace()
+                .color(theme::TEXT_DIM),
+            );
+        }
+
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            export_control(ui, state, &mut action);
+        });
+    });
+
+    action
+}
+
+fn export_control(ui: &mut egui::Ui, state: &AppState, action: &mut Option<ControlAction>) {
+    match &state.export {
+        ExportStatus::Idle => {
+            let enabled = state.has_media() && state.selection.is_usable();
+            if ui
+                .add_enabled(enabled, egui::Button::new("✂  Export clip"))
+                .clicked()
+            {
+                *action = Some(ControlAction::Export);
             }
-            div { style: "flex: 1" }
-
-            button {
-                class: "primary",
-                onclick: move |_| {
-                    spawn(async move {
-                        if let Some(input_path) = state.video_path.read().clone() {
-                            let duration = *state.duration.peek();
-                            let start_pct = *state.selection_start.peek();
-                            let end_pct = *state.selection_end.peek();
-
-                            let start_s = (start_pct / 100.0) * duration;
-                            let end_s = (end_pct / 100.0) * duration;
-
-                            let file = AsyncFileDialog::new()
-                                .set_file_name("output.mp4")
-                                .add_filter("video", &["mp4"])
-                                .save_file()
-                                .await;
-
-                            if let Some(file) = file {
-                                let output_path = file.path().to_path_buf();
-                                println!("exporting: {:.2}s até {:.2}s", start_s, end_s);
-
-                                match cut_video(input_path, output_path, start_s, end_s) {
-                                    Ok(_) => println!("success!"),
-                                    Err(e) => eprintln!("error: {}", e),
-                                }
-                            }
-                        }
-                    });
-                },
-                "FINISH"
-            }
+        }
+        ExportStatus::Running(fraction) => {
+            ui.add(
+                egui::ProgressBar::new(*fraction)
+                    .desired_width(160.0)
+                    .text(format!("{:.0}%", fraction * 100.0)),
+            );
+        }
+        ExportStatus::Finished(path) => {
+            let name = path
+                .file_name()
+                .map(|n| n.to_string_lossy().into_owned())
+                .unwrap_or_else(|| "file".to_string());
+            ui.label(egui::RichText::new(format!("✔ {name}")).color(theme::ACCENT));
+        }
+        ExportStatus::Failed(reason) => {
+            ui.label(egui::RichText::new(format!("✖ {reason}")).color(theme::DANGER));
         }
     }
 }

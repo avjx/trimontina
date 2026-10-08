@@ -1,13 +1,15 @@
 [package]
 name = "trimontina"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2024"
 
 [dependencies]
-dioxus = { version = "0.7.7", features = ["desktop"] }
-rfd = "0.15.2"
-serde = { version = "1.0.228", features = ["derive"] }
-serde_json = "1.0.149"
-tokio = { version = "1.52.2", features = ["full"] }
-interprocess = "1.2.1"
-raw-window-handle = "0.6.2"
+# Window + immediate-mode UI + OpenGL context in one crate.
+# The `glow` renderer is required: libmpv's render API is initialized with
+# OpenGL function pointers resolved from this very context.
+eframe = { version = "0.34.1", features = ["glow"] }
+# libmpv used as a decoding library (render API), not as an external player.
+libmpv2 = "6.0.0"
+thiserror = "2.0"
+# Native file dialogs.
+rfd = "0.15"
