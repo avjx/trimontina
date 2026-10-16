@@ -1,23 +1,32 @@
-use dioxus::desktop::{Config, WindowBuilder};
-use dioxus::prelude::*;
+#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod app;
 mod player;
-mod state;
 mod ui;
 mod video;
 
-use app::App;
+use std::path::PathBuf;
 
-fn main() {
-    let cfg = Config::new()
-        .with_window(
-            WindowBuilder::new()
-                .with_transparent(true)
-                .with_title("Trimontina"),
-        )
-        .with_background_color((0, 0, 0, 0))
-        .with_menu(None);
+use app::TrimontinaApp;
 
-    LaunchBuilder::desktop().with_cfg(cfg).launch(App);
+fn main() -> eframe::Result {
+    let initial_media: Option<PathBuf> = std::env::args_os().nth(1).map(PathBuf::from);
+
+    let options = eframe::NativeOptions {
+        viewport: eframe::egui::ViewportBuilder::default()
+            .with_inner_size([1280.0, 720.0])
+            .with_min_inner_size([720.0, 480.0])
+            .with_title("Trimontina"),
+        // libmpv's render API is built on this context's function pointers.
+        renderer: eframe::Renderer::Glow,
+        ..Default::default()
+    };
+
+    eframe::run_native(
+        "Trimontina",
+        options,
+        Box::new(move |cc| {
+            Ok(Box::new(TrimontinaApp::new(cc, initial_media)?) as Box<dyn eframe::App>)
+        }),
+    )
 }

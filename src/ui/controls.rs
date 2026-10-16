@@ -1,57 +1,127 @@
-use crate::state::app_state::AppState;
-use crate::video::ffmpeg::cut_video;
-use dioxus::prelude::*;
-use rfd::AsyncFileDialog;
+use eframe::egui;
 
-#[component]
-pub fn Controls() -> Element {
-    let mut state = AppState::use_state();
-    let is_playing = (state.is_playing)();
+use crate::app::{AppState, ExportStatus};
+use crate::ui::{theme, timeline};
 
-    rsx! {
-        div { class: "controls",
-            button {
-                onclick: move |_| {
-                    let next_state = !is_playing;
-                    state.is_playing.set(next_state);
-                    state.mpv.peek().set_pause(!next_state);
-                },
-                if is_playing { "PAUSE" } else { "PLAY" }
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum ControlAction {
+    OpenMedia,
+    TogglePlay,
+    Export,
+    SetVolume(f32),
+    ToggleMute,
+}
+
+pub fn show(ui: &mut egui::Ui, state: &AppState) -> Option<ControlAction> {
+    let mut action = None;
+
+    ui.horizontal(|ui| {
+        let (glyph, hint) = if state.playing {
+            ("⏸", "Pause")
+        } else {
+            ("▶", "Play")
+        };
+        let play = egui::Button::new(egui::RichText::new(glyph).size(17.0).color(theme::BACKGROUND))
+            .fill(theme::ACCENT)
+            .corner_radius(23.0)
+            .min_size(egui::vec2(46.0, 46.0));
+        if ui
+            .add_enabled(state.has_media(), play)
+            .on_hover_text(hint)
+            .clicked()
+        {
+            action = Some(ControlAction::TogglePlay);
+        }
+
+        ui.add_space(4.0);
+
+        if state.has_media() {
+            ui.label(
+                egui::RichText::new(format!(
+                    "{} / {}",
+                    timeline::format_time(state.position),
+                    timeline::format_time(state.duration)
+                ))
+                .monospace()
+                .size(13.0)
+                .color(theme::TEXT_DIM),
+            );
+        }
+
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            export_control(ui, state, &mut action);
+            ui.add_space(8.0);
+            if ui.button("Open video").clicked() {
+                action = Some(ControlAction::OpenMedia);
             }
-            div { style: "flex: 1" }
+            ui.add_space(8.0);
+            volume_control(ui, state, &mut action);
+        });
+    });
 
-            button {
-                class: "primary",
-                onclick: move |_| {
-                    spawn(async move {
-                        if let Some(input_path) = state.video_path.read().clone() {
-                            let duration = *state.duration.peek();
-                            let start_pct = *state.selection_start.peek();
-                            let end_pct = *state.selection_end.peek();
+    action
+}
 
-                            let start_s = (start_pct / 100.0) * duration;
-                            let end_s = (end_pct / 100.0) * duration;
+fn volume_control(ui: &mut egui::Ui, state: &AppState, action: &mut Option<ControlAction>) {
+    let mut volume = state.volume;
+    let slider = ui.add_sized(
+        egui::vec2(96.0, 18.0),
+        egui::Slider::new(&mut volume, 0.0..=100.0).show_value(false),
+    );
+    if slider.changed() {
+        *action = Some(ControlAction::SetVolume(volume));
+    }
+    slider.on_hover_text(format!("Volume: {:.0}%", volume));
 
-                            let file = AsyncFileDialog::new()
-                                .set_file_name("output.mp4")
-                                .add_filter("video", &["mp4"])
-                                .save_file()
-                                .await;
+    let (glyph, hint) = if state.muted {
+        ("🔇", "Unmute")
+    } else {
+        ("🔊", "Mute")
+    };
+    let mute = egui::Button::new(egui::RichText::new(glyph).size(15.0)).frame(false);
+    if ui.add(mute).on_hover_text(hint).clicked() {
+        *action = Some(ControlAction::ToggleMute);
+    }
+}
 
-                            if let Some(file) = file {
-                                let output_path = file.path().to_path_buf();
-                                println!("exporting: {:.2}s até {:.2}s", start_s, end_s);
-
-                                match cut_video(input_path, output_path, start_s, end_s) {
-                                    Ok(_) => println!("success!"),
-                                    Err(e) => eprintln!("error: {}", e),
-                                }
-                            }
-                        }
-                    });
-                },
-                "FINISH"
+fn export_control(ui: &mut egui::Ui, state: &AppState, action: &mut Option<ControlAction>) {
+    match &state.export {
+        ExportStatus::Idle => {
+            let enabled = state.has_media() && state.selection.is_usable();
+            let button = theme::primary_button("✂  Export clip");
+            if ui.add_enabled(enabled, button).clicked() {
+                *action = Some(ControlAction::Export);
             }
         }
+        ExportStatus::Running(fraction) => {
+            ui.add(
+                egui::ProgressBar::new(*fraction)
+                    .desired_width(170.0)
+                    .text(format!("{:.0}%", fraction * 100.0)),
+            );
+        }
+        ExportStatus::Finished(path) => {
+            let name = path
+                .file_name()
+                .map(|n| n.to_string_lossy().into_owned())
+                .unwrap_or_else(|| "file".to_string());
+            status_chip(ui, theme::ACCENT, "✔  Exported")
+                .on_hover_text(format!("Saved as {name}"));
+        }
+        ExportStatus::Failed(reason) => {
+            status_chip(ui, theme::DANGER, "✖  Failed").on_hover_text(reason);
+        }
     }
+}
+
+fn status_chip(ui: &mut egui::Ui, fill: egui::Color32, text: &str) -> egui::Response {
+    theme::chip(fill)
+        .show(ui, |ui| {
+            ui.label(
+                egui::RichText::new(text.to_owned())
+                    .color(theme::BACKGROUND)
+                    .strong(),
+            );
+        })
+        .response
 }
