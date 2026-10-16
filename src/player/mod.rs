@@ -26,8 +26,6 @@ fn resolve_gl(loader: &ProcAddressLoader, name: &str) -> *mut c_void {
 }
 
 pub struct Player {
-    // Field order matters: libmpv requires the render context to be released
-    // before the handle it was created from.
     render: RenderContext<'static>,
     mpv: Mpv,
     surface: Option<VideoSurface>,
@@ -41,7 +39,7 @@ impl Player {
             .ok_or(PlayerError::MissingGlowContext)?;
 
         // `vo=libmpv` is what stops mpv from opening a window, making the render
-        // API its output.
+        // API its output
         let mpv = Mpv::with_initializer(|init| {
             init.set_property("vo", "libmpv")?;
             init.set_property("hwdec", "auto-safe")?;
@@ -58,9 +56,6 @@ impl Player {
             }),
         ])?;
 
-        // SAFETY: the borrow is erased so `render` can share a struct with the
-        // `mpv` handle it came from. That handle outlives it — see the field
-        // order above.
         let render: RenderContext<'static> = unsafe { std::mem::transmute(render) };
 
         Ok(Self {
@@ -101,9 +96,6 @@ impl Player {
         Ok(())
     }
 
-    /// Deliberately does not pause: an mpv paused before playback ever starts
-    /// decodes nothing, so no frame reaches the texture and the preview stays
-    /// black.
     pub fn load(&self, path: &Path) -> Result<(), PlayerError> {
         let path = path.to_string_lossy();
         self.mpv.command("loadfile", &[path.as_ref(), "replace"])?;
@@ -117,6 +109,16 @@ impl Player {
 
     pub fn pause(&self) -> Result<(), PlayerError> {
         self.mpv.set_property("pause", true)?;
+        Ok(())
+    }
+
+    pub fn set_volume(&self, volume: f64) -> Result<(), PlayerError> {
+        self.mpv.set_property("volume", volume)?;
+        Ok(())
+    }
+
+    pub fn set_muted(&self, muted: bool) -> Result<(), PlayerError> {
+        self.mpv.set_property("mute", muted)?;
         Ok(())
     }
 

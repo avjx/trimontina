@@ -71,6 +71,9 @@ cargo build --release
 2. Copy `ffmpeg.exe` to the same folder (optional if it is on the `PATH`).
 3. `cargo build --release`
 
+The Anton typeface used by the wordmark is embedded from `assets/fonts/` at
+compile time, so nothing needs installing at runtime.
+
 ## Usage
 
 ```bash
@@ -81,9 +84,15 @@ trimontina video.mp4       # opens the file directly
 - **Click the video** to pause or resume playback.
 - **Drag on the track** to move the playhead (seeks the video).
 - **Drag the handles** to set the start and end of the clip.
-- **Export clip** writes the cut, with a progress bar.
-- The interface hides itself while playing and comes back on mouse movement.
+- **Volume and mute** only change what you hear. The export copies the audio
+  stream untouched, so they never affect the output file.
+- **Export clip** writes the cut with a progress bar, then shows the result for
+  three seconds before the button becomes available again.
+- The interface floats over the video on translucent cards, and hides itself
+  while playing; move the mouse to bring it back.
 - Times are shown as `HH:MM:SS`.
+- The wordmark splits along a diagonal on hover and is swept by a band while
+  exporting.
 
 ### Two constraints of mpv's render API
 
@@ -111,10 +120,11 @@ src/
 │   ├── state.rs       AppState — plain data, no framework types
 │   └── selection.rs   Selection — the `start <= end` invariant
 ├── ui/                interface (egui)
-│   ├── theme.rs       visual identity
+│   ├── theme.rs       palette, card frames, bundled fonts
+│   ├── title.rs       animated wordmark (sliced to fake a diagonal cut)
 │   ├── preview.rs     video surface
 │   ├── timeline.rs    track, handles and playhead
-│   └── controls.rs    open / play / export
+│   └── controls.rs    open / play / volume / export
 └── video/             export
     ├── mod.rs         background execution
     └── ffmpeg.rs      lossless cut, with progress
@@ -134,9 +144,10 @@ Three principles drive the separation:
 nix-shell --command "cargo test"
 ```
 
-They cover the `Selection` invariants, the `AppState` transitions, the timeline
-geometry (which element a press grabs, time formatting) and a real cut through
-`ffmpeg` (using `testdata/sample.mp4`).
+They cover the `Selection` invariants, the `AppState` transitions (including
+the export result clearing itself), the timeline geometry (which element a press
+grabs, time formatting) and a real cut through `ffmpeg` (using
+`testdata/sample.mp4`).
 
 ## Design notes
 

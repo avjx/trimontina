@@ -3,7 +3,7 @@ use eframe::egui::{self, Align2, Color32, FontId, Pos2, Rect, Sense, Stroke, Vec
 use crate::app::{AppState, DragTarget};
 use crate::ui::theme;
 
-const HEIGHT: f32 = 58.0;
+const HEIGHT: f32 = 50.0;
 const TRACK_THICKNESS: f32 = 8.0;
 const SIDE_PADDING: f32 = 14.0;
 const HANDLE_WIDTH: f32 = 10.0;
@@ -137,14 +137,6 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState) -> TimelineAction {
         FontId::monospace(11.0),
         theme::TEXT_DIM,
     );
-    painter.text(
-        rect.left_bottom() + Vec2::new(0.0, -2.0),
-        Align2::LEFT_BOTTOM,
-        format_time(state.position),
-        FontId::monospace(11.0),
-        theme::TEXT_DIM,
-    );
-
     action
 }
 

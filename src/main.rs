@@ -14,7 +14,7 @@ fn main() -> eframe::Result {
 
     let options = eframe::NativeOptions {
         viewport: eframe::egui::ViewportBuilder::default()
-            .with_inner_size([1180.0, 760.0])
+            .with_inner_size([1280.0, 720.0])
             .with_min_inner_size([720.0, 480.0])
             .with_title("Trimontina"),
         // libmpv's render API is built on this context's function pointers.

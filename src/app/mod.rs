@@ -19,6 +19,10 @@ use crate::video::{self, ExportEvent};
 // mpv's decode.
 const SETTLE: std::time::Duration = std::time::Duration::from_millis(2000);
 
+/// sec the overlay takes to fade in or out. distinct from `IDLE_LIMIT`,
+/// which is how long the UI waits before fading
+const FADE_SECONDS: f32 = 0.40;
+
 pub struct TrimontinaApp {
     player: Player,
     state: AppState,
@@ -68,6 +72,19 @@ impl TrimontinaApp {
             Some(ControlAction::OpenMedia) => self.open_media_dialog(),
             Some(ControlAction::TogglePlay) => self.toggle_play(),
             Some(ControlAction::Export) => self.start_export(),
+            Some(ControlAction::SetVolume(volume)) => {
+                self.state.volume = volume;
+                if let Err(err) = self.player.set_volume(f64::from(volume)) {
+                    self.report(err);
+                }
+            }
+            Some(ControlAction::ToggleMute) => {
+                let muted = !self.state.muted;
+                self.state.muted = muted;
+                if let Err(err) = self.player.set_muted(muted) {
+                    self.report(err);
+                }
+            }
             None => {}
         }
     }
@@ -151,6 +168,7 @@ impl TrimontinaApp {
         };
         self.export_events = Some(video::cut_in_background(input, output, cut));
         self.state.export = ExportStatus::Running(0.0);
+        self.state.export_result_at = None;
         self.state.error = None;
     }
 
@@ -166,12 +184,12 @@ impl TrimontinaApp {
                     self.state.export = ExportStatus::Running(fraction);
                 }
                 Ok(ExportEvent::Completed(path)) => {
-                    self.state.export = ExportStatus::Finished(path);
+                    self.state.finish_export(ExportStatus::Finished(path));
                     finished = true;
                 }
                 Ok(ExportEvent::Failed(reason)) => {
-                    self.state.export = ExportStatus::Failed(reason.clone());
-                    self.state.error = Some(reason);
+                    self.state.error = Some(reason.clone());
+                    self.state.finish_export(ExportStatus::Failed(reason));
                     finished = true;
                 }
                 Err(TryRecvError::Empty) => break,
@@ -237,13 +255,17 @@ impl eframe::App for TrimontinaApp {
         self.apply_pending();
         self.poll_media_dialog();
         self.poll_export();
+        self.state.expire_export(std::time::Instant::now());
+        if let Some(remaining) = self.state.export_result_remaining() {
+            ctx.request_repaint_after(remaining);
+        }
         self.sync_from_player(ctx);
 
         if let Err(err) = self.player.render() {
             self.report(err);
         }
 
-        // mpv drops frames when the embedder draws too rarely.
+        //mpv drops frames when the embedder draws too rarely.
         let playing = !self.player.is_paused();
         let settling =
             matches!(self.settle_until, Some(deadline) if std::time::Instant::now() < deadline);
@@ -264,48 +286,92 @@ impl eframe::App for TrimontinaApp {
             ..
         } = self;
 
-        let visible = state.ui_visible();
-
-        if visible {
-            egui::Panel::top("trimontina-header").show_inside(ui, |ui| {
-                ui.horizontal(|ui| {
-                    ui.heading(egui::RichText::new("TRIMONTINA").color(ui::theme::ACCENT));
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        let name = state
-                            .media_path
-                            .as_ref()
-                            .and_then(|path| path.file_name())
-                            .map(|name| name.to_string_lossy().into_owned())
-                            .unwrap_or_else(|| "No file".to_string());
-                        ui.label(egui::RichText::new(name).color(ui::theme::TEXT_DIM));
-                    });
-                });
-            });
-
-            egui::Panel::bottom("trimontina-controls").show_inside(ui, |ui| {
-                let action = ui::timeline::show(ui, state);
-                if action.seek_to.is_some() {
-                    *pending_seek = action.seek_to;
-                }
-
-                ui.separator();
-
-                if let Some(action) = ui::controls::show(ui, state) {
-                    *pending_action = Some(action);
-                }
-
-                if let Some(text) = &state.error {
-                    ui.colored_label(ui::theme::DANGER, text);
-                }
-            });
-        }
+        let ctx = ui.ctx().clone();
 
         egui::CentralPanel::default()
-            .frame(egui::Frame::default().fill(ui::theme::BACKGROUND))
+            .frame(egui::Frame::NONE.fill(ui::theme::BACKGROUND))
             .show_inside(ui, |ui| {
                 if ui::preview::show(ui, player, state.has_media()) {
                     *pending_action = Some(ControlAction::TogglePlay);
                 }
             });
+
+        let opacity = ctx.animate_bool_with_time(
+            egui::Id::new("trimontina-overlay"),
+            state.ui_visible(),
+            FADE_SECONDS,
+        );
+        if opacity <= 0.01 {
+            return;
+        }
+        if opacity < 0.99 {
+            ctx.request_repaint();
+        }
+
+        let screen = ctx.content_rect();
+        let margin = 18.0;
+        let width = (screen.width() - margin * 2.0).max(320.0);
+
+        egui::Area::new(egui::Id::new("trimontina-header"))
+            .order(egui::Order::Foreground)
+            .anchor(egui::Align2::LEFT_TOP, egui::vec2(margin, margin))
+            .interactable(state.ui_visible())
+            .show(&ctx, |ui| {
+                ui.set_width(width);
+                ui::theme::card(opacity).show(ui, |ui| header_bar(ui, state));
+            });
+
+        egui::Area::new(egui::Id::new("trimontina-controls"))
+            .order(egui::Order::Foreground)
+            .anchor(egui::Align2::LEFT_BOTTOM, egui::vec2(margin, -margin))
+            .interactable(state.ui_visible())
+            .show(&ctx, |ui| {
+                ui.set_width(width);
+                ui::theme::card(opacity).show(ui, |ui| {
+                    bottom_bar(ui, state, pending_action, pending_seek)
+                });
+            });
+    }
+}
+
+fn header_bar(ui: &mut egui::Ui, state: &AppState) {
+    ui.horizontal(|ui| {
+        let exporting = matches!(state.export, ExportStatus::Running(_));
+        ui::title::glitch_title(ui, "TRIMONTINA", exporting);
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            let name = state
+                .media_path
+                .as_ref()
+                .and_then(|path| path.file_name())
+                .map(|name| name.to_string_lossy().into_owned())
+                .unwrap_or_else(|| "No file".to_string());
+            ui.label(
+                egui::RichText::new(name)
+                    .color(ui::theme::TEXT_DIM)
+                    .size(12.0),
+            );
+        });
+    });
+}
+
+fn bottom_bar(
+    ui: &mut egui::Ui,
+    state: &mut AppState,
+    pending_action: &mut Option<ControlAction>,
+    pending_seek: &mut Option<f64>,
+) {
+    let action = ui::timeline::show(ui, state);
+    if action.seek_to.is_some() {
+        *pending_seek = action.seek_to;
+    }
+
+    ui.add_space(8.0);
+
+    if let Some(action) = ui::controls::show(ui, state) {
+        *pending_action = Some(action);
+    }
+
+    if let Some(text) = &state.error {
+        ui.colored_label(ui::theme::DANGER, text);
     }
 }
