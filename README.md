@@ -9,7 +9,7 @@ re-encoding, no quality loss, and an export that finishes almost instantly.
 
 ## How it works
 
-The preview is **native rendering** — not a webview, and not the window of an
+The preview is **native rendering** not a webview, and not the window of an
 external player:
 
 ```
