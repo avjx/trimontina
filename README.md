@@ -5,6 +5,8 @@ Lossless video trimmer with a native preview and a modern interface.
 Pick a range on the timeline and export it with `ffmpeg -c copy`: no
 re-encoding, no quality loss, and an export that finishes almost instantly.
 
+![The Trimontina window with a video loaded](assets/preview.png)
+
 ## How it works
 
 The preview is **native rendering** — not a webview, and not the window of an
